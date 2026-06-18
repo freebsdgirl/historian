@@ -14,6 +14,7 @@ import httpx
 from .app import build_app
 from .client import HistorianClient
 from .config import Settings
+from .debug import check_debug_path
 from .errors import ConfigError, HistorianError
 from .http import create_http_app
 from .manifests import VALID_SCOPES, load_manifest
@@ -111,11 +112,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "serve":
             import uvicorn
 
-            context = build_app(args.config_path)
+            context = build_app(args.config_path, clear_operational_log=True)
             uvicorn.run(
                 create_http_app(context),
                 host=args.host or context.settings.http_host,
                 port=args.port or context.settings.http_port,
+                log_level=context.settings.log_level.lower(),
             )
             return 0
 
@@ -205,7 +207,25 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "apps": len(context.store.list_apps()),
                 "schemas": len(context.store.list_schemas()),
                 "database_exists": settings.expanded_database_path.exists(),
+                "debug": {
+                    "enabled": settings.debug_enabled,
+                    "operational_log": check_debug_path(settings.expanded_debug_log_path)
+                    if settings.debug_enabled
+                    else {"path": str(settings.expanded_debug_log_path), "writable": None, "error": None},
+                    "resolver_log": check_debug_path(settings.expanded_resolver_debug_log_path)
+                    if settings.debug_enabled
+                    else {
+                        "path": str(settings.expanded_resolver_debug_log_path),
+                        "writable": None,
+                        "error": None,
+                    },
+                },
             }
+            if settings.debug_enabled and not (
+                payload["debug"]["operational_log"]["writable"]
+                and payload["debug"]["resolver_log"]["writable"]
+            ):
+                payload["status"] = "error"
             if args.live and settings.resolver_backend == "openai_compatible":
                 try:
                     response = httpx.get(

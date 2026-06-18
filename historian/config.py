@@ -53,7 +53,8 @@ class Settings:
     resolver_model: str = "gemma4:latest"
     resolver_api_key: str = ""
     resolver_include_reasoning: bool = False
-    resolver_include_raw_output: bool = False
+    debug_enabled: bool = False
+    debug_log_path: str = "/tmp/historian-debug.log"
     resolver_debug_log_path: str = "/tmp/historian-resolver.log"
     request_timeout_seconds: float = 60.0
     verify_tls: bool = True
@@ -146,10 +147,23 @@ class Settings:
             raise ConfigError("regex_timeout_seconds must be greater than 0 and at most 1.")
         if self.log_level not in {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"}:
             raise ConfigError("log_level is invalid.")
+        if self.debug_enabled:
+            if not self.debug_log_path.strip():
+                raise ConfigError("debug_log_path cannot be empty when debug_enabled is true.")
+            if not self.resolver_debug_log_path.strip():
+                raise ConfigError("resolver_debug_log_path cannot be empty when debug_enabled is true.")
 
     @property
     def expanded_database_path(self) -> Path:
         return Path(self.database_path).expanduser()
+
+    @property
+    def expanded_debug_log_path(self) -> Path:
+        return Path(self.debug_log_path).expanduser()
+
+    @property
+    def expanded_resolver_debug_log_path(self) -> Path:
+        return Path(self.resolver_debug_log_path).expanduser()
 
     def sanitized(self) -> dict[str, Any]:
         payload = {
@@ -159,4 +173,6 @@ class Settings:
         }
         payload["has_resolver_api_key"] = bool(self.resolver_api_key)
         payload["database_path"] = str(self.expanded_database_path)
+        payload["debug_log_path"] = str(self.expanded_debug_log_path)
+        payload["resolver_debug_log_path"] = str(self.expanded_resolver_debug_log_path)
         return payload

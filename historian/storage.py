@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Iterator, Protocol
 
 from .errors import AuthenticationError, ConflictError, StorageError, ValidationError
+from .debug import get_logger
 from .models import (
     AppManifest,
     AuthPrincipal,
@@ -32,6 +33,7 @@ except ImportError:  # Development fallback; regex is a required package in inst
 
 
 SCHEMA_VERSION = 1
+_LOG = get_logger("storage")
 
 
 class HistorianStore(Protocol):
@@ -150,7 +152,13 @@ class SQLiteHistorianStore:
                     if current < 1:
                         connection.executescript(_MIGRATION_1)
                         connection.execute("PRAGMA user_version = 1")
+                    _LOG.debug(
+                        "database=%s storage_initialized schema_version=%s wal=true",
+                        self.database_path,
+                        SCHEMA_VERSION,
+                    )
             except sqlite3.Error as exc:
+                _LOG.exception("database=%s storage_initialization_failed", self.database_path)
                 raise StorageError(f"Could not initialize SQLite database {self.database_path}: {exc}") from exc
 
     def install_app(self, manifest: AppManifest) -> str:
@@ -175,7 +183,14 @@ class SQLiteHistorianStore:
                     ),
                 )
         except sqlite3.Error as exc:
+            _LOG.exception("app_id=%s app_install_failed", manifest.app_id)
             raise StorageError(f"Could not install app {manifest.app_id}: {exc}") from exc
+        _LOG.info(
+            "app_id=%s schemas=%s scopes=%s app_installed",
+            manifest.app_id,
+            len(manifest.schemas),
+            manifest.default_scopes,
+        )
         return token
 
     def ensure_manifest(self, manifest: AppManifest) -> None:
@@ -184,7 +199,9 @@ class SQLiteHistorianStore:
             with self._connect() as connection:
                 self._ensure_manifest_connection(connection, manifest, now)
         except sqlite3.Error as exc:
+            _LOG.exception("app_id=%s schema_install_failed", manifest.app_id)
             raise StorageError(f"Could not install schemas for {manifest.app_id}: {exc}") from exc
+        _LOG.debug("app_id=%s schemas=%s schemas_ensured", manifest.app_id, len(manifest.schemas))
 
     @staticmethod
     def _ensure_manifest_connection(
@@ -295,7 +312,9 @@ class SQLiteHistorianStore:
                 (_token_hash(token),),
             ).fetchone()
         if not row:
+            _LOG.warning("authentication_failed token_present=%s", bool(token))
             raise AuthenticationError("Bearer token is invalid or revoked.")
+        _LOG.debug("app_id=%s token_id=%s authentication_succeeded", row["app_id"], row["token_id"])
         return AuthPrincipal(row["app_id"], row["token_id"], frozenset(json.loads(row["scopes_json"])))
 
     def get_schema(
@@ -532,6 +551,20 @@ class SQLiteHistorianStore:
             except TimeoutError as exc:
                 raise ValidationError("Regex search exceeded its execution timeout.") from exc
             events = filtered
+        _LOG.debug(
+            "search apps=%s types=%s families=%s after=%s before=%s terms=%s phrases=%s fields=%s regex_count=%s candidates=%s results=%s",
+            spec.apps,
+            spec.event_types,
+            spec.record_families,
+            spec.occurred_after,
+            spec.occurred_before,
+            spec.required_terms,
+            spec.exact_phrases,
+            sorted(spec.field_predicates),
+            len(spec.regex_patterns),
+            candidate_limit,
+            min(len(events), spec.limit),
+        )
         return events[: spec.limit]
 
     @staticmethod

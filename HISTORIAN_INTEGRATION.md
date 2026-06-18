@@ -12,6 +12,8 @@ Implement logging once at the service/provider boundary so every transport gets 
 
 Historian event writes use ordinary authenticated HTTP. A2A is for natural-language queries, not event ingestion.
 
+When debugging an integration, enable Historian's `debug_enabled` setting. Inspect the configured operational log for accepted/rejected event metadata and the resolver log for the complete latest A2A query prompt/response chain. Producer applications must still log their own delivery failures locally.
+
 ## Runtime Contract
 
 Default Historian URL:
@@ -425,4 +427,3 @@ The integration is complete when:
 8. An A2A question such as “What did Vesper do this morning?” or “Why did Magpie fail?” returns an answer citing the emitted event ID.
 9. Stopping Historian produces visible delivery warnings but does not break successful domain operations.
 10. No event contains secrets or confuses internal runtime activity with literal user speech.
-

@@ -24,3 +24,12 @@ def test_unknown_config_field_is_rejected(tmp_path) -> None:
     with pytest.raises(ConfigError, match="Unknown config fields"):
         Settings.load(str(path))
 
+
+def test_debug_paths_are_required_when_enabled(tmp_path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps({"debug_enabled": True, "debug_log_path": ""}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="debug_log_path"):
+        Settings.load(str(path))

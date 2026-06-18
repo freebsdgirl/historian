@@ -9,17 +9,28 @@ from dataclasses import asdict
 from typing import Any
 
 from .config import Settings
+from .debug import QueryTranscript, get_logger
 from .errors import AuthorizationError, QueryError, ValidationError
 from .models import AuthPrincipal, EventEnvelope, QueryResult, SearchSpec, StoredEvent, utc_now
 from .resolver import QueryResolver
 from .storage import SQLiteHistorianStore
 
 
+_LOG = get_logger("service")
+
+
 class HistorianService:
-    def __init__(self, store: SQLiteHistorianStore, resolver: QueryResolver, settings: Settings):
+    def __init__(
+        self,
+        store: SQLiteHistorianStore,
+        resolver: QueryResolver,
+        settings: Settings,
+        transcript: QueryTranscript,
+    ):
         self.store = store
         self.resolver = resolver
         self.settings = settings
+        self.transcript = transcript
 
     @staticmethod
     def require_scope(principal: AuthPrincipal, scope: str) -> None:
@@ -32,7 +43,15 @@ class HistorianService:
         encoded_size = len(json.dumps(payload, ensure_ascii=True).encode("utf-8"))
         if encoded_size > self.settings.max_event_bytes:
             raise ValidationError(f"Event exceeds max_event_bytes ({self.settings.max_event_bytes}).")
-        return self.store.ingest(principal, event)
+        stored, duplicate = self.store.ingest(principal, event)
+        _LOG.debug(
+            "event_id=%s producer_app=%s type=%s duplicate=%s ingest_complete",
+            stored.event_id,
+            stored.producer_app_id,
+            stored.event_type,
+            duplicate,
+        )
+        return stored, duplicate
 
     def ingest_batch(
         self, principal: AuthPrincipal, payloads: list[dict[str, Any]]
@@ -46,7 +65,14 @@ class HistorianService:
             if encoded_size > self.settings.max_event_bytes:
                 raise ValidationError(f"Event exceeds max_event_bytes ({self.settings.max_event_bytes}).")
             events.append(self.parse_event(payload))
-        return self.store.ingest_batch(principal, events)
+        results = self.store.ingest_batch(principal, events)
+        _LOG.debug(
+            "producer_app=%s batch_count=%s duplicate_count=%s batch_ingest_complete",
+            principal.app_id,
+            len(results),
+            sum(1 for _, duplicate in results if duplicate),
+        )
+        return results
 
     def raw_search(self, principal: AuthPrincipal, spec: SearchSpec) -> list[StoredEvent]:
         self.require_scope(principal, "events:read")
@@ -68,6 +94,8 @@ class HistorianService:
             raise ValidationError("Question cannot be empty.")
         query_id = str(uuid.uuid4())
         started = time.perf_counter()
+        self.transcript.start(query_id=query_id, caller_app_id=principal.app_id, question=question)
+        _LOG.info("query_id=%s caller_app=%s query_started question_chars=%s", query_id, principal.app_id, len(question))
         history: list[dict[str, Any]] = []
         searches: list[dict[str, Any]] = []
         evidence: dict[str, StoredEvent] = {}
@@ -75,14 +103,17 @@ class HistorianService:
         result: QueryResult | None = None
 
         try:
-            for _ in range(self.settings.max_query_steps):
+            for step in range(1, self.settings.max_query_steps + 1):
                 action = self.resolver.next_action(
                     question=question,
                     current_time=utc_now(),
                     catalog=self.store.search_catalog(),
                     history=history,
+                    query_id=query_id,
+                    step=step,
                 )
                 kind = str(action.get("action", "")).strip()
+                _LOG.debug("query_id=%s step=%s action=%s", query_id, step, kind)
                 if kind == "search":
                     raw_spec = action.get("search")
                     if not isinstance(raw_spec, dict):
@@ -102,6 +133,21 @@ class HistorianService:
                         "events": [self._compact_event(event) for event in matches],
                     }
                     searches.append({"search": asdict(spec), "count": len(matches)})
+                    _LOG.debug(
+                        "query_id=%s step=%s search apps=%s types=%s families=%s after=%s before=%s terms=%s phrases=%s regex_count=%s limit=%s results=%s",
+                        query_id,
+                        step,
+                        spec.apps,
+                        spec.event_types,
+                        spec.record_families,
+                        spec.occurred_after,
+                        spec.occurred_before,
+                        spec.required_terms,
+                        spec.exact_phrases,
+                        len(spec.regex_patterns),
+                        spec.limit,
+                        len(matches),
+                    )
                     history.append(summary)
                     self._trim_history(history)
                     continue
@@ -121,6 +167,7 @@ class HistorianService:
                         }
                     )
                     self._trim_history(history)
+                    _LOG.debug("query_id=%s step=%s fetched_events=%s", query_id, step, len(fetched))
                     continue
                 if kind == "answer":
                     status = action.get("status")
@@ -164,6 +211,7 @@ class HistorianService:
                 )
             return result
         except Exception as exc:
+            _LOG.exception("query_id=%s query_failed", query_id)
             result = QueryResult(
                 status="error",
                 answer="Historian could not complete the query.",
@@ -176,6 +224,23 @@ class HistorianService:
             return result
         finally:
             if result is not None:
+                elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+                self.transcript.finish(
+                    query_id=query_id,
+                    status=result.status,
+                    search_step_count=len(searches),
+                    cited_event_ids=result.cited_event_ids,
+                    elapsed_ms=elapsed_ms,
+                    error=result.message,
+                )
+                _LOG.info(
+                    "query_id=%s query_finished status=%s searches=%s citations=%s elapsed_ms=%s",
+                    query_id,
+                    result.status,
+                    len(searches),
+                    len(result.cited_event_ids),
+                    elapsed_ms,
+                )
                 self._record_query(principal, question, result, started)
 
     def _record_query(

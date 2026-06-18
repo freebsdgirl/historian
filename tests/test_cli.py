@@ -42,3 +42,21 @@ def test_app_install_and_doctor(config_path, tmp_path, capsys) -> None:
     assert doctor["status"] == "ok"
     assert doctor["apps"] == 2
 
+
+def test_serve_passes_configured_log_level(config_path, monkeypatch) -> None:
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    payload["log_level"] = "WARNING"
+    payload["debug_enabled"] = True
+    payload["debug_log_path"] = str(config_path.parent / "serve-debug.log")
+    payload["resolver_debug_log_path"] = str(config_path.parent / "serve-resolver.log")
+    config_path.write_text(json.dumps(payload), encoding="utf-8")
+    (config_path.parent / "serve-debug.log").write_text("stale\n", encoding="utf-8")
+    captured = {}
+
+    def fake_run(app, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr("uvicorn.run", fake_run)
+    assert main(["--config", str(config_path), "serve"]) == 0
+    assert captured["log_level"] == "warning"
+    assert "stale" not in (config_path.parent / "serve-debug.log").read_text(encoding="utf-8")

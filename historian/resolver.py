@@ -3,20 +3,18 @@
 from __future__ import annotations
 
 import json
-import threading
-from datetime import UTC, datetime
 from dataclasses import dataclass, field
-from pathlib import Path
 from time import perf_counter
 from typing import Any, Protocol
 
 import httpx
 
 from .config import Settings
+from .debug import QueryTranscript, get_logger
 from .errors import ResolverError
 
 
-_DEBUG_LOG_LOCK = threading.Lock()
+_LOG = get_logger("resolver")
 
 
 class QueryResolver(Protocol):
@@ -27,6 +25,8 @@ class QueryResolver(Protocol):
         current_time: str,
         catalog: list[dict[str, Any]],
         history: list[dict[str, Any]],
+        query_id: str,
+        step: int,
     ) -> dict[str, Any]: ...
 
 
@@ -38,6 +38,7 @@ def reasoning_options(enabled: bool) -> dict[str, Any]:
 @dataclass(slots=True)
 class OpenAICompatibleQueryResolver:
     settings: Settings
+    transcript: QueryTranscript
     transport: httpx.BaseTransport | None = None
 
     def next_action(
@@ -47,6 +48,8 @@ class OpenAICompatibleQueryResolver:
         current_time: str,
         catalog: list[dict[str, Any]],
         history: list[dict[str, Any]],
+        query_id: str,
+        step: int,
     ) -> dict[str, Any]:
         system = (
             "You operate the Historian record search loop. Return exactly one JSON object. "
@@ -68,9 +71,11 @@ class OpenAICompatibleQueryResolver:
             "available_records": catalog,
             "search_history": history,
         }
-        return self._ask_json(system, user)
+        return self._ask_json(system, user, query_id=query_id, step=step)
 
-    def _ask_json(self, system: str, user: dict[str, Any]) -> dict[str, Any]:
+    def _ask_json(
+        self, system: str, user: dict[str, Any], *, query_id: str, step: int
+    ) -> dict[str, Any]:
         action_schema = {
             "type": "object",
             "properties": {
@@ -119,6 +124,11 @@ class OpenAICompatibleQueryResolver:
         if self.settings.resolver_api_key:
             headers["Authorization"] = f"Bearer {self.settings.resolver_api_key}"
         started = perf_counter()
+        endpoint = self.settings.resolver_base_url.rstrip("/") + "/chat/completions"
+        user_message = json.dumps(user, ensure_ascii=True)
+        http_status: int | None = None
+        response_content: str | None = None
+        reasoning_content: str | None = None
         try:
             with httpx.Client(
                 timeout=self.settings.request_timeout_seconds,
@@ -126,48 +136,92 @@ class OpenAICompatibleQueryResolver:
                 transport=self.transport,
             ) as client:
                 response = client.post(
-                    self.settings.resolver_base_url.rstrip("/") + "/chat/completions",
+                    endpoint,
                     json=payload,
                     headers=headers,
                 )
+            http_status = response.status_code
+            response_content = response.text
             response.raise_for_status()
             body = response.json()
             content = body["choices"][0]["message"]["content"]
+            response_content = content if isinstance(content, str) else json.dumps(content, ensure_ascii=True)
+            reasoning_content = self._extract_reasoning(body)
             result = json.loads(content) if isinstance(content, str) else content
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
-            self._append_debug(system, user, None, round((perf_counter() - started) * 1000, 2), str(exc))
+            elapsed_ms = round((perf_counter() - started) * 1000, 2)
+            self.transcript.append_call(
+                query_id=query_id,
+                step=step,
+                model=self.settings.resolver_model,
+                endpoint=endpoint,
+                system_prompt=system,
+                user_message=user_message,
+                elapsed_ms=elapsed_ms,
+                http_status=http_status,
+                response_content=response_content,
+                reasoning_content=reasoning_content,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            _LOG.exception(
+                "query_id=%s step=%s model_call_failed elapsed_ms=%s http_status=%s",
+                query_id,
+                step,
+                elapsed_ms,
+                http_status,
+            )
             raise ResolverError(f"Historian resolver failed: {exc}") from exc
         if not isinstance(result, dict):
-            raise ResolverError("Historian resolver did not return an object.")
-        self._append_debug(
-            system,
-            user,
-            content if self.settings.resolver_include_raw_output else None,
-            round((perf_counter() - started) * 1000, 2),
-            None,
+            elapsed_ms = round((perf_counter() - started) * 1000, 2)
+            error = "Historian resolver did not return an object."
+            self.transcript.append_call(
+                query_id=query_id,
+                step=step,
+                model=self.settings.resolver_model,
+                endpoint=endpoint,
+                system_prompt=system,
+                user_message=user_message,
+                elapsed_ms=elapsed_ms,
+                http_status=http_status,
+                response_content=response_content,
+                reasoning_content=reasoning_content,
+                error=error,
+            )
+            _LOG.error("query_id=%s step=%s model_response_not_object", query_id, step)
+            raise ResolverError(error)
+        elapsed_ms = round((perf_counter() - started) * 1000, 2)
+        self.transcript.append_call(
+            query_id=query_id,
+            step=step,
+            model=self.settings.resolver_model,
+            endpoint=endpoint,
+            system_prompt=system,
+            user_message=user_message,
+            elapsed_ms=elapsed_ms,
+            http_status=http_status,
+            response_content=response_content,
+            reasoning_content=reasoning_content,
+            error=None,
+        )
+        _LOG.debug(
+            "query_id=%s step=%s model_call_complete elapsed_ms=%s http_status=%s response_chars=%s",
+            query_id,
+            step,
+            elapsed_ms,
+            http_status,
+            len(response_content or ""),
         )
         return result
 
-    def _append_debug(
-        self,
-        system: str,
-        user: dict[str, Any],
-        raw_output: Any,
-        elapsed_ms: float,
-        error: str | None,
-    ) -> None:
-        path = Path(self.settings.resolver_debug_log_path).expanduser()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        entry = {
-            "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-            "elapsed_ms": elapsed_ms,
-            "system": system,
-            "user": user,
-            "raw_output": raw_output,
-            "error": error,
-        }
-        with _DEBUG_LOG_LOCK, path.open("a", encoding="utf-8", errors="backslashreplace") as handle:
-            handle.write(json.dumps(entry, ensure_ascii=True, sort_keys=True) + "\n")
+    def _extract_reasoning(self, body: dict[str, Any]) -> str | None:
+        if not self.settings.resolver_include_reasoning:
+            return None
+        message = body.get("choices", [{}])[0].get("message", {})
+        for key in ("reasoning", "reasoning_content", "thinking"):
+            value = message.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+        return None
 
 
 @dataclass(slots=True)
@@ -182,9 +236,18 @@ class FakeQueryResolver:
         current_time: str,
         catalog: list[dict[str, Any]],
         history: list[dict[str, Any]],
+        query_id: str,
+        step: int,
     ) -> dict[str, Any]:
         self.calls.append(
-            {"question": question, "current_time": current_time, "catalog": catalog, "history": history}
+            {
+                "question": question,
+                "current_time": current_time,
+                "catalog": catalog,
+                "history": history,
+                "query_id": query_id,
+                "step": step,
+            }
         )
         if not self.actions:
             return {

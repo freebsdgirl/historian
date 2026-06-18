@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextvars
+import time
 import uuid
 from dataclasses import asdict
 from typing import Any
@@ -38,6 +39,7 @@ from fastapi.responses import JSONResponse
 from google.protobuf.json_format import MessageToDict
 
 from .app import AppContext
+from .debug import get_logger
 from .errors import (
     AuthenticationError,
     AuthorizationError,
@@ -52,6 +54,7 @@ _request_principal: contextvars.ContextVar[AuthPrincipal | None] = contextvars.C
     "historian_request_principal", default=None
 )
 _PUBLIC_PATHS = {"/healthz", "/.well-known/agent-card", "/.well-known/agent-card.json"}
+_LOG = get_logger("http")
 
 
 def _bearer_token(request: Request) -> str:
@@ -129,6 +132,13 @@ class HistorianAgentExecutor(AgentExecutor):
             history=[context.message],
         )
         await event_queue.enqueue_event(task)
+        _LOG.info(
+            "task_id=%s context_id=%s caller_app=%s a2a_query_started question_chars=%s",
+            context.task_id,
+            context.context_id,
+            principal.app_id,
+            len(question),
+        )
         updater = TaskUpdater(event_queue=event_queue, task_id=context.task_id, context_id=context.context_id)
         await updater.start_work()
         result = self.context.service.query(principal, question)
@@ -151,6 +161,13 @@ class HistorianAgentExecutor(AgentExecutor):
             await updater.failed(message)
         else:
             await updater.complete(message)
+        _LOG.info(
+            "task_id=%s caller_app=%s a2a_query_finished status=%s query_id=%s",
+            context.task_id,
+            principal.app_id,
+            result.status,
+            result.query_id,
+        )
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         if not context.task_id or not context.context_id:
@@ -165,33 +182,71 @@ def create_http_app(context: AppContext) -> FastAPI:
 
     @app.middleware("http")
     async def authenticate_request(request: Request, call_next):
+        started = time.perf_counter()
         if request.url.path in _PUBLIC_PATHS:
-            return await call_next(request)
+            response = await call_next(request)
+            _LOG.debug(
+                "method=%s path=%s status=%s elapsed_ms=%s public=true",
+                request.method,
+                request.url.path,
+                response.status_code,
+                round((time.perf_counter() - started) * 1000, 2),
+            )
+            return response
         try:
             principal = context.store.authenticate(_bearer_token(request))
         except AuthenticationError as exc:
+            _LOG.warning(
+                "method=%s path=%s auth_failed elapsed_ms=%s error=%s",
+                request.method,
+                request.url.path,
+                round((time.perf_counter() - started) * 1000, 2),
+                exc,
+            )
             return JSONResponse({"status": "error", "message": str(exc)}, status_code=401)
         token = _request_principal.set(principal)
         request.state.principal = principal
         try:
-            return await call_next(request)
+            response = await call_next(request)
+            _LOG.debug(
+                "method=%s path=%s status=%s caller_app=%s elapsed_ms=%s",
+                request.method,
+                request.url.path,
+                response.status_code,
+                principal.app_id,
+                round((time.perf_counter() - started) * 1000, 2),
+            )
+            return response
+        except Exception:
+            _LOG.exception(
+                "method=%s path=%s caller_app=%s request_failed elapsed_ms=%s",
+                request.method,
+                request.url.path,
+                principal.app_id,
+                round((time.perf_counter() - started) * 1000, 2),
+            )
+            raise
         finally:
             _request_principal.reset(token)
 
     @app.exception_handler(AuthorizationError)
     async def authorization_error(_: Request, exc: AuthorizationError):
+        _LOG.warning("authorization_failed error=%s", exc)
         return JSONResponse({"status": "error", "message": str(exc)}, status_code=403)
 
     @app.exception_handler(ValidationError)
     async def validation_error(_: Request, exc: ValidationError):
+        _LOG.warning("validation_failed error=%s", exc)
         return JSONResponse({"status": "error", "message": str(exc)}, status_code=422)
 
     @app.exception_handler(ConflictError)
     async def conflict_error(_: Request, exc: ConflictError):
+        _LOG.warning("conflict error=%s", exc)
         return JSONResponse({"status": "error", "message": str(exc)}, status_code=409)
 
     @app.exception_handler(HistorianError)
     async def historian_error(_: Request, exc: HistorianError):
+        _LOG.exception("historian_request_failed error=%s", exc)
         return JSONResponse({"status": "error", "message": str(exc)}, status_code=500)
 
     @app.get("/healthz")
@@ -206,6 +261,13 @@ def create_http_app(context: AppContext) -> FastAPI:
     @app.post("/v1/events")
     async def ingest_event(request: Request) -> dict[str, Any]:
         event, duplicate = context.service.ingest(request.state.principal, await request.json())
+        _LOG.info(
+            "event_id=%s producer_app=%s type=%s duplicate=%s event_ingested",
+            event.event_id,
+            event.producer_app_id,
+            event.event_type,
+            duplicate,
+        )
         return {"status": "ok", "duplicate": duplicate, "event": to_jsonable(event)}
 
     @app.post("/v1/events:batch")
@@ -215,6 +277,12 @@ def create_http_app(context: AppContext) -> FastAPI:
         if not isinstance(events, list):
             raise ValidationError("Batch body must contain an events array.")
         results = context.service.ingest_batch(request.state.principal, events)
+        _LOG.info(
+            "producer_app=%s batch_ingested count=%s duplicates=%s",
+            request.state.principal.app_id,
+            len(results),
+            sum(1 for _, duplicate in results if duplicate),
+        )
         return {
             "status": "ok",
             "events": [

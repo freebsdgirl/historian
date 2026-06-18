@@ -18,6 +18,7 @@ Historian v1 is implemented as a Python 3.12 service with:
 - An iterative query loop over timestamps, application IDs, event types, record families, exact fields, literal terms, exact phrases, and bounded regex.
 - Citation validation: answers may cite only exact event IDs found during the query.
 - Private self-logging of Historian queries without model reasoning.
+- Unified debug mode with a startup-scoped operational log and a complete last-query local-model transcript.
 - CLI administration, querying, raw inspection, and event emission.
 - A synchronous Python client with bounded retries.
 
@@ -43,7 +44,7 @@ These steps are needed before Historian is a continuously running, useful servic
    - `resolver_base_url`, normally `http://localhost:11434/v1`
    - `resolver_model`, currently expected to be `gemma4:latest`
    - `resolver_api_key`, if the endpoint requires one
-   - reasoning and raw-output logging settings
+   - reasoning and unified debug logging settings
 
 4. Run `.venv/bin/historian doctor --live` and verify the model endpoint responds.
 
@@ -54,6 +55,7 @@ These steps are needed before Historian is a continuously running, useful servic
    - authenticated ingestion
    - authenticated raw reads
    - an authenticated A2A question using a real local model
+   - operational debug output and the exact last-query prompt/response transcript
 
 6. Exercise the real model against representative records. The search loop and structured output are implemented, but prompt behavior has only been tested with fake and mock resolvers. Tune the prompt or normalization if Gemma emits poor literal terms, invalid dates, excessive regex, or premature answers.
 
@@ -74,8 +76,8 @@ These steps are needed before Historian is a continuously running, useful servic
 ## Validation Still Needed
 
 - A real listening-server smoke test outside the Codex sandbox. The sandbox rejected localhost port binding, although the complete HTTP/A2A stack passed through in-process ASGI tests.
-- A real Ollama `/chat/completions` query using `gemma4:latest`.
-- Installation from a clean virtual environment, including the required `regex` package. Tests used an existing sibling environment where `regex` was absent, so the standard-library fallback ran; installed Historian should exercise the configured regex execution-timeout path.
+- A real Ollama `/chat/completions` query using `gemma4:latest`, inspected through the last-query transcript.
+- A clean project-local virtual environment is now installed and the suite exercises the required timeout-capable `regex` package. A packaged installation on another machine still needs a release-time smoke test.
 - Long-running concurrency behavior under simultaneous ingestion and queries.
 - Database growth measurements with realistic Magpie and Vesper event volumes.
 - Recovery behavior after abrupt termination during SQLite writes.
@@ -112,4 +114,3 @@ These are not required for initial operation:
 - Metrics and dashboards beyond Historian's own query/event history.
 
 Vector or embedding retrieval is not deferred work. It is outside the design.
-

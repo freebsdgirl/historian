@@ -33,6 +33,38 @@ historian ask "What did Vesper do this morning?"
 
 Configuration discovery order is `--config`, `HISTORIAN_CONFIG_PATH`, `./config.json`, then `${XDG_CONFIG_HOME:-~/.config}/historian/config.json`. Environment variables use the `HISTORIAN_` prefix.
 
+## Debugging
+
+Enable unified debugging in `config.json`:
+
+```json
+{
+  "debug_enabled": true,
+  "debug_log_path": "/tmp/historian-debug.log",
+  "resolver_debug_log_path": "/tmp/historian-resolver.log",
+  "log_level": "INFO"
+}
+```
+
+`debug_enabled` controls two owner-readable files:
+
+- `debug_log_path` is the operational log. `historian serve` clears it on startup, then records sanitized startup/storage information, authentication failures, HTTP and A2A lifecycle, event IDs/types, batch counts, search controls/result counts, model-call timing, query status, citations, and exception traces. It does not include bearer tokens, API keys, authorization headers, or complete event payloads.
+- `resolver_debug_log_path` contains only the newest top-level NLP query. A new query overwrites the file. It contains every iterative local-model call for that query with labeled `SYSTEM PROMPT`, `USER MESSAGE`, `RESPONSE`, optional `REASONING`, and `ERROR` sections, followed by the final query status and citations.
+
+The resolver transcript can contain conversation text and event evidence. Both debug files are created with owner-only permissions. Do not publish them.
+
+`log_level` controls console and Uvicorn verbosity independently. Debug mode always writes detailed `DEBUG` records to the operational file even when console logging remains `INFO` or `WARNING`.
+
+Useful checks:
+
+```console
+.venv/bin/historian doctor --live
+tail -f /tmp/historian-debug.log
+less /tmp/historian-resolver.log
+```
+
+`doctor` reports whether debug mode is enabled and whether both configured paths are writable.
+
 ## Integration
 
 An application ships a manifest containing its event schemas. The administrator installs it:

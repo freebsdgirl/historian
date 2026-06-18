@@ -86,9 +86,14 @@ def test_planner_uses_compact_catalog_and_optional_filters(tmp_path) -> None:
     assert "record_family" not in captured["messages"][1]["content"]
     system = captured["messages"][0]["content"]
     assert "Format examples generated from the current catalog" in system
-    assert "a local-day search" in system
-    assert "a per-record-type literal search" in system
-    assert "an unbounded search" in system
+    assert "five recent records" in system
+    assert "the latest record" in system
+    assert "unlimited chronological records" in system
+    schema_properties = captured["response_format"]["json_schema"]["schema"]["properties"]
+    assert schema_properties["limit"] == {"type": "integer", "minimum": 1}
+    assert schema_properties["sort"]["enum"] == ["oldest", "newest"]
+    assert '"limit": 1, "sort": "newest"' in system
+    assert '"limit": 5, "sort": "newest"' in system
 
 
 def test_planner_examples_do_not_hardcode_apps_or_record_types(tmp_path) -> None:
@@ -195,14 +200,12 @@ def test_synthesizer_cannot_request_more_searches(tmp_path) -> None:
     answer = resolver.synthesize_answer(
         question="What happened?",
         current_time="2026-06-17T12:00:00-07:00",
-        evidence=[
-            {
-                "app": "vesper",
-                "type": "music.playback.started",
-                "occurred_at": "2026-06-17T08:00:00-07:00",
-                "text": "track: Morning Song",
-            }
-        ],
+        evidence=(
+            "Original question: What happened?\n"
+            "Records 1-1 of 1, oldest first.\n\n"
+            "[2026-06-17 08:00:00 PDT] vesper | music.playback.started | track: Morning Song"
+        ),
+        hard_cap_reached=False,
         query_id="query-1",
         step=2,
     )
@@ -305,6 +308,37 @@ def test_planner_retries_invented_record_type_with_correction(tmp_path) -> None:
     assert "=== MODEL CALL 2 ===" in log
 
 
+def test_planner_retries_invalid_limit_and_sort(tmp_path) -> None:
+    requests: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        content = (
+            '{"limit":"one","sort":"latest","searches":[]}'
+            if len(requests) == 1
+            else '{"limit":1,"sort":"newest","searches":[]}'
+        )
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": content}}]},
+        )
+
+    resolver = _resolver(tmp_path, handler)
+    plan = resolver.plan_searches(
+        question="What was latest?",
+        current_time="2026-06-17T12:00:00-07:00",
+        catalog=[],
+        query_id="query-1",
+        step=1,
+    )
+    assert plan == {"limit": 1, "sort": "newest", "searches": []}
+    correction = json.loads(requests[1]["messages"][1]["content"])[
+        "retry_correction"
+    ]
+    assert "not of type 'integer'" in correction["previous_error"]
+    assert "is not one of" in correction["previous_error"]
+
+
 def test_synthesizer_retries_schema_violation(tmp_path) -> None:
     requests: list[dict] = []
 
@@ -324,7 +358,8 @@ def test_synthesizer_retries_schema_violation(tmp_path) -> None:
     answer = resolver.synthesize_answer(
         question="What happened?",
         current_time="2026-06-17T12:00:00-07:00",
-        evidence=[],
+        evidence="No records.",
+        hard_cap_reached=False,
         query_id="query-1",
         step=2,
     )
@@ -333,6 +368,49 @@ def test_synthesizer_retries_schema_violation(tmp_path) -> None:
         "retry_correction"
     ]
     assert "answer" in correction["previous_error"]
+
+
+def test_chunk_summary_and_final_synthesis_retry_schema_violations(tmp_path) -> None:
+    requests: list[dict] = []
+    responses = iter(
+        [
+            '{"summary":""}',
+            '{"summary":"Vesper played two tracks."}',
+            '{"status":"ok"}',
+            '{"status":"ok","answer":"Vesper played two tracks."}',
+        ]
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": next(responses)}}]},
+        )
+
+    resolver = _resolver(tmp_path, handler)
+    summary = resolver.summarize_evidence_chunk(
+        question="What played?",
+        current_time="2026-06-17T12:00:00-07:00",
+        evidence="Records 1-2 of 4.",
+        chunk_index=1,
+        total_chunks=2,
+        record_start=1,
+        record_end=2,
+        total_records=4,
+        query_id="query-1",
+        step=2,
+    )
+    answer = resolver.synthesize_summaries(
+        question="What played?",
+        current_time="2026-06-17T12:00:00-07:00",
+        summaries=[summary["summary"]],
+        hard_cap_reached=False,
+        query_id="query-1",
+        step=3,
+    )
+    assert answer["answer"] == "Vesper played two tracks."
+    assert len(requests) == 4
 
 
 def test_resolver_stops_after_three_retries(tmp_path) -> None:

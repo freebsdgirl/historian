@@ -98,7 +98,7 @@ class HistorianService:
         self.transcript.start(query_id=query_id, caller_app_id=principal.app_id, question=question)
         _LOG.info("query_id=%s caller_app=%s query_started question_chars=%s", query_id, principal.app_id, len(question))
         searches: list[dict[str, Any]] = []
-        evidence: dict[str, StoredEvent] = {}
+        evidence: dict[tuple[str, str, str], StoredEvent] = {}
         result: QueryResult | None = None
 
         try:
@@ -114,6 +114,22 @@ class HistorianService:
             raw_searches = plan.get("searches")
             if not isinstance(raw_searches, list):
                 raise QueryError("Resolver search plan omitted searches.")
+            planned_limit = plan.get("limit")
+            if (
+                not isinstance(planned_limit, int)
+                or isinstance(planned_limit, bool)
+                or planned_limit < 1
+            ):
+                planned_limit = None
+            sort = plan.get("sort", "oldest")
+            if sort not in {"oldest", "newest"}:
+                sort = "oldest"
+            selection_limit = min(
+                planned_limit if planned_limit is not None else self.settings.max_query_records,
+                self.settings.max_query_records,
+            )
+            detect_hard_cap = planned_limit is None or planned_limit > self.settings.max_query_records
+            per_search_limit = selection_limit + (1 if detect_hard_cap else 0)
             allowed = {
                 (app["app"], record_type)
                 for app in catalog
@@ -161,9 +177,10 @@ class HistorianService:
                             occurred_after=begin,
                             occurred_before=end,
                             exact_phrases=[search_text] if search_text else [],
-                            order="asc",
-                            limit=self.settings.max_search_results,
-                        )
+                            order="asc" if sort == "oldest" else "desc",
+                            limit=per_search_limit,
+                        ),
+                        max_results=per_search_limit,
                     )
                     matches = self.store.search(
                         spec,
@@ -171,7 +188,12 @@ class HistorianService:
                         regex_timeout_seconds=self.settings.regex_timeout_seconds,
                     )
                     for event in matches:
-                        evidence[event.event_id] = event
+                        identity = (
+                            event.producer_app_id,
+                            event.source,
+                            event.event_id,
+                        )
+                        evidence[identity] = event
                     search_summary = {
                         "app": app,
                         "record_type": record_type,
@@ -201,25 +223,71 @@ class HistorianService:
                 )
                 return result
 
-            compact_evidence = self._bounded_evidence(list(evidence.values()))
-            answer = self.resolver.synthesize_answer(
-                question=question,
-                current_time=current_time,
-                evidence=compact_evidence,
-                query_id=query_id,
-                step=2,
+            ordered = sorted(
+                evidence.values(),
+                key=self._event_sort_key,
+                reverse=sort == "newest",
             )
+            hard_cap_reached = detect_hard_cap and len(ordered) > self.settings.max_query_records
+            selected = ordered[:selection_limit]
+            chunks = self._evidence_chunks(question, selected, sort)
+            if len(chunks) == 1:
+                answer = self.resolver.synthesize_answer(
+                    question=question,
+                    current_time=current_time,
+                    evidence=chunks[0][2],
+                    hard_cap_reached=hard_cap_reached,
+                    query_id=query_id,
+                    step=2,
+                )
+            else:
+                summaries: list[str] = []
+                for chunk_index, (record_start, record_end, text) in enumerate(
+                    chunks, start=1
+                ):
+                    summary = self.resolver.summarize_evidence_chunk(
+                        question=question,
+                        current_time=current_time,
+                        evidence=text,
+                        chunk_index=chunk_index,
+                        total_chunks=len(chunks),
+                        record_start=record_start,
+                        record_end=record_end,
+                        total_records=len(selected),
+                        query_id=query_id,
+                        step=chunk_index + 1,
+                    )
+                    summary_text = str(summary.get("summary") or "").strip()
+                    if not summary_text:
+                        raise QueryError("Resolver chunk summary is empty.")
+                    summaries.append(summary_text)
+                answer = self.resolver.synthesize_summaries(
+                    question=question,
+                    current_time=current_time,
+                    summaries=summaries,
+                    hard_cap_reached=hard_cap_reached,
+                    query_id=query_id,
+                    step=len(chunks) + 2,
+                )
             status = answer.get("status")
             answer_text = str(answer.get("answer") or "").strip()
             if status not in {"ok", "partial", "insufficient_evidence"}:
                 raise QueryError("Resolver answer status is invalid.")
             if not answer_text:
                 raise QueryError("Resolver answer is empty.")
+            cap_message = None
+            if hard_cap_reached:
+                status = "partial"
+                cap_message = (
+                    f"Result limited to the first {self.settings.max_query_records} "
+                    "records because max_query_records was reached."
+                )
             result = QueryResult(
                 status=status,
                 answer=answer_text,
                 query_id=query_id,
                 searches=searches,
+                message=cap_message,
             )
             return result
         except Exception as exc:
@@ -277,8 +345,11 @@ class HistorianService:
             # Query logging must not erase an otherwise valid answer.
             return
 
-    def _normalize_search(self, spec: SearchSpec) -> SearchSpec:
-        spec.limit = max(1, min(int(spec.limit), self.settings.max_search_results))
+    def _normalize_search(
+        self, spec: SearchSpec, *, max_results: int | None = None
+    ) -> SearchSpec:
+        result_cap = max_results or self.settings.max_search_results
+        spec.limit = max(1, min(int(spec.limit), result_cap))
         if spec.order not in {"asc", "desc"}:
             spec.order = "desc"
         spec.required_terms = self._literal_list(spec.required_terms, 12, 128)
@@ -357,22 +428,48 @@ class HistorianService:
         begin = current.replace(hour=0, minute=0, second=0, microsecond=0)
         return begin.isoformat(), current.isoformat()
 
-    def _bounded_evidence(self, events: list[StoredEvent]) -> list[dict[str, Any]]:
-        result: list[dict[str, Any]] = []
-        for event in sorted(events, key=lambda item: item.occurred_at):
-            compact = self._compact_event(event)
-            candidate = result + [compact]
-            if (
-                result
-                and len(json.dumps(candidate, ensure_ascii=True))
-                > self.settings.max_evidence_characters
-            ):
-                break
-            result.append(compact)
-        return result
+    def _evidence_chunks(
+        self,
+        question: str,
+        events: list[StoredEvent],
+        sort: str,
+    ) -> list[tuple[int, int, str]]:
+        lines = [self._format_event(event) for event in events]
+        chunks: list[tuple[int, int, str]] = []
+        start = 0
+        order_label = "oldest first" if sort == "oldest" else "newest first"
+        while start < len(lines):
+            selected_lines: list[str] = []
+            end = start
+            while end < len(lines) and len(selected_lines) < self.settings.max_records_per_model_call:
+                candidate_lines = selected_lines + [lines[end]]
+                header = (
+                    f"Original question: {question}\n"
+                    f"Records {start + 1}-{end + 1} of {len(lines)}, {order_label}.\n\n"
+                )
+                candidate = header + "\n".join(candidate_lines)
+                if (
+                    selected_lines
+                    and len(candidate) > self.settings.max_evidence_characters
+                ):
+                    break
+                selected_lines = candidate_lines
+                end += 1
+            header = (
+                f"Original question: {question}\n"
+                f"Records {start + 1}-{end} of {len(lines)}, {order_label}.\n\n"
+            )
+            chunks.append((start + 1, end, header + "\n".join(selected_lines)))
+            start = end
+        return chunks
 
     @staticmethod
-    def _compact_event(event: StoredEvent) -> dict[str, Any]:
+    def _event_sort_key(event: StoredEvent) -> tuple[datetime, str, str, str]:
+        timestamp = datetime.fromisoformat(event.occurred_at.replace("Z", "+00:00"))
+        return timestamp, event.producer_app_id, event.source, event.event_id
+
+    @staticmethod
+    def _format_event(event: StoredEvent) -> str:
         metadata_prefixes = (
             "source:",
             "type:",
@@ -383,17 +480,22 @@ class HistorianService:
             "causation_id:",
             "session_id:",
         )
-        details = "\n".join(
-            line
-            for line in event.canonical_text.splitlines()
-            if not line.startswith(metadata_prefixes)
+        detail_lines: list[str] = []
+        for line in event.canonical_text.splitlines():
+            stripped = line.strip()
+            if not stripped or line.startswith(metadata_prefixes):
+                continue
+            name, separator, value = stripped.partition(": ")
+            detail_lines.append(f"{name}={value}" if separator else stripped)
+        details = "; ".join(detail_lines)
+        occurred_at = datetime.fromisoformat(
+            event.occurred_at.replace("Z", "+00:00")
+        ).astimezone()
+        timestamp = occurred_at.strftime("%Y-%m-%d %H:%M:%S %Z")
+        return (
+            f"[{timestamp}] {event.producer_app_id} | {event.event_type}"
+            + (f" | {details}" if details else "")
         )
-        return {
-            "app": event.producer_app_id,
-            "type": event.event_type,
-            "occurred_at": event.occurred_at,
-            "details": details[:2000],
-        }
 
     @staticmethod
     def parse_event(payload: dict[str, Any]) -> EventEnvelope:

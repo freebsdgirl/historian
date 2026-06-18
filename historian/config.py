@@ -64,6 +64,8 @@ class Settings:
     max_query_steps: int = 5
     max_search_results: int = 50
     max_full_event_fetches: int = 20
+    max_records_per_model_call: int = 50
+    max_query_records: int = 1000
     max_evidence_characters: int = 32000
     max_regex_patterns: int = 3
     max_regex_length: int = 256
@@ -138,6 +140,8 @@ class Settings:
             "max_query_steps",
             "max_search_results",
             "max_full_event_fetches",
+            "max_records_per_model_call",
+            "max_query_records",
             "max_evidence_characters",
             "max_regex_patterns",
             "max_regex_length",

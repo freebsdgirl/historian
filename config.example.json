@@ -17,6 +17,8 @@
   "verify_tls": true,
   "log_level": "INFO",
   "max_search_results": 50,
+  "max_records_per_model_call": 50,
+  "max_query_records": 1000,
   "max_evidence_characters": 32000,
   "max_regex_patterns": 3,
   "max_regex_length": 256,

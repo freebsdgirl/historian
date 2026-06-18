@@ -41,6 +41,8 @@ This stores an owner-only token at `~/.config/historian/cli-token` by default. C
 
 Configuration discovery order is `--config`, `HISTORIAN_CONFIG_PATH`, `./config.json`, then `${XDG_CONFIG_HOME:-~/.config}/historian/config.json`. Environment variables use the `HISTORIAN_` prefix.
 
+NLP queries merge and deduplicate all planned searches before applying the planner's global ordering and limit. `max_records_per_model_call` defaults to `50`, `max_query_records` defaults to `1000`, and `max_evidence_characters` is a secondary per-call chunk boundary. `max_search_results` continues to govern raw event-search APIs.
+
 ## Debugging
 
 Enable unified debugging in `config.json`:

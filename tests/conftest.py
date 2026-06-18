@@ -63,6 +63,26 @@ def vesper_manifest():
                         "required": ["request", "track", "artist", "secret"],
                         "additionalProperties": False,
                     },
+                },
+                {
+                    "event_type": "music.playback.stopped",
+                    "version": 1,
+                    "record_family": "event",
+                    "description": "Playback stopped.",
+                    "searchable_fields": ["request", "track", "artist", "secret"],
+                    "redacted_fields": ["secret"],
+                    "json_schema": {
+                        "$schema": "https://json-schema.org/draft/2020-12/schema",
+                        "type": "object",
+                        "properties": {
+                            "request": {"type": "string"},
+                            "track": {"type": "string"},
+                            "artist": {"type": "string"},
+                            "secret": {"type": "string"},
+                        },
+                        "required": ["request", "track", "artist", "secret"],
+                        "additionalProperties": False,
+                    },
                 }
             ],
         }
@@ -79,12 +99,13 @@ def event(
     *,
     occurred_at: str = "2026-06-17T08:00:00-07:00",
     track: str = "Morning Song",
+    event_type: str = "music.playback.started",
 ) -> dict:
     return {
         "specversion": "1.0",
         "id": event_id,
         "source": "app://vesper/playback",
-        "type": "music.playback.started",
+        "type": event_type,
         "time": occurred_at,
         "schemaversion": 1,
         "correlationid": "morning-session",
@@ -95,4 +116,3 @@ def event(
             "secret": "do-not-store",
         },
     }
-

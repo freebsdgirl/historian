@@ -38,7 +38,34 @@ class QueryResolver(Protocol):
         *,
         question: str,
         current_time: str,
-        evidence: list[dict[str, Any]],
+        evidence: str,
+        hard_cap_reached: bool = False,
+        query_id: str,
+        step: int,
+    ) -> dict[str, Any]: ...
+
+    def summarize_evidence_chunk(
+        self,
+        *,
+        question: str,
+        current_time: str,
+        evidence: str,
+        chunk_index: int,
+        total_chunks: int,
+        record_start: int,
+        record_end: int,
+        total_records: int,
+        query_id: str,
+        step: int,
+    ) -> dict[str, Any]: ...
+
+    def synthesize_summaries(
+        self,
+        *,
+        question: str,
+        current_time: str,
+        summaries: list[str],
+        hard_cap_reached: bool = False,
         query_id: str,
         step: int,
     ) -> dict[str, Any]: ...
@@ -102,7 +129,9 @@ class OpenAICompatibleQueryResolver:
         broad_types = example_types(broad_app)
         literal_types = example_types(literal_app)
         unbounded_types = example_types(unbounded_app)
-        broad_example = {
+        recent_example = {
+            "limit": 5,
+            "sort": "newest",
             "searches": [
                 {
                     "app": broad_app["app"],
@@ -115,7 +144,9 @@ class OpenAICompatibleQueryResolver:
                 }
             ]
         }
-        literal_example = {
+        latest_example = {
+            "limit": 1,
+            "sort": "newest",
             "searches": [
                 {
                     "app": literal_app["app"],
@@ -140,6 +171,8 @@ class OpenAICompatibleQueryResolver:
         }
         system = (
             "Plan literal searches of Historian records. Return exactly one JSON object containing searches. "
+            "The optional top-level limit applies globally after all searches are merged and deduplicated. "
+            "The optional top-level sort is oldest or newest and defaults to oldest. "
             "Each search selects one listed application and one or more listed record types. "
             "begin and end are optional on each application search. search is optional on each record type. "
             "Use begin/end only when the question implies a time range; "
@@ -151,9 +184,9 @@ class OpenAICompatibleQueryResolver:
             "Never invent applications or record types. Do not answer the question and do not include reasoning.\n\n"
             "Format examples generated from the current catalog. The short record-type lists demonstrate shape "
             "only; choose every record type relevant to the real question.\n"
-            f'Example: a local-day search\n{json.dumps(broad_example, ensure_ascii=True)}\n'
-            f'Example: a per-record-type literal search\n{json.dumps(literal_example, ensure_ascii=True)}\n'
-            f'Example: an unbounded search with no literal text\n{json.dumps(unbounded_example, ensure_ascii=True)}'
+            f'Example: five recent records\n{json.dumps(recent_example, ensure_ascii=True)}\n'
+            f'Example: the latest record\n{json.dumps(latest_example, ensure_ascii=True)}\n'
+            f'Example: unlimited chronological records\n{json.dumps(unbounded_example, ensure_ascii=True)}'
         )
         user = {
             "question": question,
@@ -163,6 +196,8 @@ class OpenAICompatibleQueryResolver:
         schema = {
             "type": "object",
             "properties": {
+                "limit": {"type": "integer", "minimum": 1},
+                "sort": {"type": "string", "enum": ["oldest", "newest"]},
                 "searches": {
                     "type": "array",
                     "maxItems": 50,
@@ -210,12 +245,98 @@ class OpenAICompatibleQueryResolver:
         *,
         question: str,
         current_time: str,
-        evidence: list[dict[str, Any]],
+        evidence: str,
+        hard_cap_reached: bool = False,
+        query_id: str,
+        step: int,
+    ) -> dict[str, Any]:
+        return self._synthesize(
+            question=question,
+            current_time=current_time,
+            evidence=evidence,
+            summaries=None,
+            hard_cap_reached=hard_cap_reached,
+            query_id=query_id,
+            step=step,
+        )
+
+    def summarize_evidence_chunk(
+        self,
+        *,
+        question: str,
+        current_time: str,
+        evidence: str,
+        chunk_index: int,
+        total_chunks: int,
+        record_start: int,
+        record_end: int,
+        total_records: int,
         query_id: str,
         step: int,
     ) -> dict[str, Any]:
         system = (
-            "Answer the question using only the supplied Historian records. Return exactly one JSON object. "
+            "Summarize this one evidence chunk for a later final synthesis. Return exactly one JSON object. "
+            "Focus only on facts relevant to the original question. Preserve relevant names, timestamps, "
+            "outcomes, and within-chunk counts. This is partial evidence: do not claim to answer from the "
+            "complete record set, do not request another search, and do not guess."
+        )
+        user = {
+            "original_question": question,
+            "current_system_time": current_time,
+            "chunk": f"{chunk_index} of {total_chunks}",
+            "record_range": f"{record_start}-{record_end} of {total_records}",
+            "notice": "This chunk contains only part of the evidence.",
+            "records": evidence,
+        }
+        schema = {
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
+            "required": ["summary"],
+            "additionalProperties": False,
+        }
+        return self._ask_json(
+            system,
+            user,
+            schema_name="historian_chunk_summary",
+            schema=schema,
+            query_id=query_id,
+            step=step,
+            semantic_validator=self._validate_summary,
+        )
+
+    def synthesize_summaries(
+        self,
+        *,
+        question: str,
+        current_time: str,
+        summaries: list[str],
+        hard_cap_reached: bool,
+        query_id: str,
+        step: int,
+    ) -> dict[str, Any]:
+        return self._synthesize(
+            question=question,
+            current_time=current_time,
+            evidence=None,
+            summaries=summaries,
+            hard_cap_reached=hard_cap_reached,
+            query_id=query_id,
+            step=step,
+        )
+
+    def _synthesize(
+        self,
+        *,
+        question: str,
+        current_time: str,
+        evidence: str | None,
+        summaries: list[str] | None,
+        hard_cap_reached: bool,
+        query_id: str,
+        step: int,
+    ) -> dict[str, Any]:
+        system = (
+            "Answer the question using only the supplied Historian records or chunk summaries. Return exactly one JSON object. "
             "Use status=ok when the records answer the question, partial when they support only part of it, "
             "or insufficient_evidence when they do not establish an "
             "answer. For broad activity questions, write a concise high-level summary of at most 120 words. "
@@ -228,10 +349,18 @@ class OpenAICompatibleQueryResolver:
             'played multiple tracks automatically, and then stopped playback."}'
         )
         user: dict[str, Any] = {
-            "question": question,
+            "original_question": question,
             "current_system_time": current_time,
-            "records": evidence,
+            "hard_query_cap_reached": hard_cap_reached,
         }
+        if evidence is not None:
+            user["records"] = evidence
+        else:
+            user["chunk_summaries"] = [
+                f"Chunk {index}: {summary}"
+                for index, summary in enumerate(summaries or [], start=1)
+            ]
+            user["notice"] = "Each summary covers a sequential portion of the selected records."
         schema = {
             "type": "object",
             "properties": {
@@ -491,6 +620,13 @@ class OpenAICompatibleQueryResolver:
         return []
 
     @staticmethod
+    def _validate_summary(result: dict[str, Any]) -> list[str]:
+        summary = result.get("summary")
+        if isinstance(summary, str) and not summary.strip():
+            return ["summary must not be empty"]
+        return []
+
+    @staticmethod
     def _decode_object(content: str) -> dict[str, Any]:
         """Accept the first JSON object when a local model appends a control token."""
         stripped = content.lstrip()
@@ -514,6 +650,7 @@ class OpenAICompatibleQueryResolver:
 class FakeQueryResolver:
     plans: list[dict[str, Any]] = field(default_factory=list)
     answers: list[dict[str, Any]] = field(default_factory=list)
+    chunk_summaries: list[dict[str, Any]] = field(default_factory=list)
     calls: list[dict[str, Any]] = field(default_factory=list)
 
     def plan_searches(
@@ -542,7 +679,8 @@ class FakeQueryResolver:
         *,
         question: str,
         current_time: str,
-        evidence: list[dict[str, Any]],
+        evidence: str,
+        hard_cap_reached: bool = False,
         query_id: str,
         step: int,
     ) -> dict[str, Any]:
@@ -552,6 +690,68 @@ class FakeQueryResolver:
                 "question": question,
                 "current_time": current_time,
                 "evidence": evidence,
+                "hard_cap_reached": hard_cap_reached,
+                "query_id": query_id,
+                "step": step,
+            }
+        )
+        if self.answers:
+            return self.answers.pop(0)
+        return {
+            "status": "insufficient_evidence",
+            "answer": "No configured fake answer.",
+        }
+
+    def summarize_evidence_chunk(
+        self,
+        *,
+        question: str,
+        current_time: str,
+        evidence: str,
+        chunk_index: int,
+        total_chunks: int,
+        record_start: int,
+        record_end: int,
+        total_records: int,
+        query_id: str,
+        step: int,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            {
+                "kind": "chunk_summary",
+                "question": question,
+                "current_time": current_time,
+                "evidence": evidence,
+                "chunk_index": chunk_index,
+                "total_chunks": total_chunks,
+                "record_start": record_start,
+                "record_end": record_end,
+                "total_records": total_records,
+                "query_id": query_id,
+                "step": step,
+            }
+        )
+        if self.chunk_summaries:
+            return self.chunk_summaries.pop(0)
+        return {"summary": f"Records {record_start}-{record_end} summarized."}
+
+    def synthesize_summaries(
+        self,
+        *,
+        question: str,
+        current_time: str,
+        summaries: list[str],
+        hard_cap_reached: bool = False,
+        query_id: str,
+        step: int,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            {
+                "kind": "final_answer",
+                "question": question,
+                "current_time": current_time,
+                "summaries": summaries,
+                "hard_cap_reached": hard_cap_reached,
                 "query_id": query_id,
                 "step": step,
             }

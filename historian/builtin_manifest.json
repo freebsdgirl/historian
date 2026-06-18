@@ -1,0 +1,201 @@
+{
+  "app_id": "historian",
+  "description": "Historian internal records and shared core continuity schemas.",
+  "default_scopes": ["events:write", "events:read", "query:nlp"],
+  "schemas": [
+    {
+      "event_type": "core.transcript.user_message",
+      "version": 1,
+      "record_family": "transcript",
+      "description": "A literal message authored by the human user.",
+      "searchable_fields": ["content", "author_id", "channel", "conversation_id"],
+      "redacted_fields": [],
+      "json_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "content": {"type": "string"},
+          "author_id": {"type": "string"},
+          "channel": {"type": "string"},
+          "conversation_id": {"type": "string"},
+          "message_id": {"type": "string"}
+        },
+        "required": ["content", "author_id", "channel", "conversation_id"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "event_type": "core.transcript.assistant_message",
+      "version": 1,
+      "record_family": "transcript",
+      "description": "A literal message emitted by the conversational assistant.",
+      "searchable_fields": ["content", "assistant_id", "channel", "conversation_id"],
+      "redacted_fields": [],
+      "json_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "content": {"type": "string"},
+          "assistant_id": {"type": "string"},
+          "channel": {"type": "string"},
+          "conversation_id": {"type": "string"},
+          "message_id": {"type": "string"}
+        },
+        "required": ["content", "assistant_id", "channel", "conversation_id"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "event_type": "core.runtime.internal_event",
+      "version": 1,
+      "record_family": "internal",
+      "description": "A private runtime, sidecar, or worker event that must not be represented as user speech.",
+      "searchable_fields": ["kind", "source_component", "content", "conversation_id"],
+      "redacted_fields": ["secret"],
+      "json_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "kind": {"type": "string"},
+          "source_component": {"type": "string"},
+          "content": {"type": "string"},
+          "conversation_id": {"type": ["string", "null"]},
+          "secret": {}
+        },
+        "required": ["kind", "source_component", "content"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "event_type": "core.conversation.summary",
+      "version": 1,
+      "record_family": "summary",
+      "description": "A derived summary of a bounded conversation or session.",
+      "searchable_fields": ["summary", "topics", "conversation_id"],
+      "redacted_fields": [],
+      "json_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "summary": {"type": "string"},
+          "topics": {"type": "array", "items": {"type": "string"}},
+          "conversation_id": {"type": "string"},
+          "source_event_ids": {"type": "array", "items": {"type": "string"}},
+          "generator": {"type": "string"}
+        },
+        "required": ["summary", "conversation_id", "source_event_ids"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "event_type": "core.user.fact",
+      "version": 1,
+      "record_family": "user_fact",
+      "description": "A durable user fact with provenance.",
+      "searchable_fields": ["subject", "predicate", "value", "user_id"],
+      "redacted_fields": [],
+      "json_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "user_id": {"type": "string"},
+          "subject": {"type": "string"},
+          "predicate": {"type": "string"},
+          "value": {},
+          "source_event_ids": {"type": "array", "items": {"type": "string"}},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+        },
+        "required": ["user_id", "subject", "predicate", "value", "source_event_ids"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "event_type": "core.application.preference",
+      "version": 1,
+      "record_family": "app_preference",
+      "description": "An application-scoped user preference with provenance.",
+      "searchable_fields": ["app_id", "category", "target", "polarity", "reason"],
+      "redacted_fields": [],
+      "json_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "app_id": {"type": "string"},
+          "category": {"type": "string"},
+          "target": {},
+          "polarity": {"type": "string", "enum": ["like", "dislike", "neutral", "avoid", "prefer"]},
+          "reason": {"type": ["string", "null"]},
+          "source_event_ids": {"type": "array", "items": {"type": "string"}}
+        },
+        "required": ["app_id", "category", "target", "polarity", "source_event_ids"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "event_type": "core.operation.error",
+      "version": 1,
+      "record_family": "error",
+      "description": "An operational error emitted by an application or worker.",
+      "searchable_fields": ["app_id", "component", "error_type", "message", "operation"],
+      "redacted_fields": ["details.secret"],
+      "json_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "app_id": {"type": "string"},
+          "component": {"type": "string"},
+          "error_type": {"type": "string"},
+          "message": {"type": "string"},
+          "operation": {"type": ["string", "null"]},
+          "details": {"type": "object"}
+        },
+        "required": ["app_id", "component", "error_type", "message"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "event_type": "core.operation.status",
+      "version": 1,
+      "record_family": "status",
+      "description": "An application or component status transition.",
+      "searchable_fields": ["app_id", "component", "status", "message"],
+      "redacted_fields": [],
+      "json_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "app_id": {"type": "string"},
+          "component": {"type": "string"},
+          "status": {"type": "string"},
+          "message": {"type": ["string", "null"]}
+        },
+        "required": ["app_id", "component", "status"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "event_type": "historian.query.completed",
+      "version": 1,
+      "record_family": "internal",
+      "description": "An auditable Historian natural-language query trace without hidden model reasoning.",
+      "searchable_fields": ["caller_app_id", "question", "status", "cited_event_ids"],
+      "redacted_fields": [],
+      "json_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "caller_app_id": {"type": "string"},
+          "question": {"type": "string"},
+          "status": {"type": "string"},
+          "searches": {"type": "array", "items": {"type": "object"}},
+          "cited_event_ids": {"type": "array", "items": {"type": "string"}},
+          "elapsed_ms": {"type": "number"},
+          "answer": {"type": "string"}
+        },
+        "required": ["caller_app_id", "question", "status", "searches", "cited_event_ids", "elapsed_ms", "answer"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}
+

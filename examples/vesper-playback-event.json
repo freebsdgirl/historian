@@ -1,0 +1,17 @@
+{
+  "specversion": "1.0",
+  "id": "example-playback-1",
+  "source": "app://vesper/playback",
+  "type": "music.playback.started",
+  "time": "2026-06-17T08:00:00-07:00",
+  "schemaversion": 1,
+  "correlationid": "morning-session-1",
+  "visibility": "private",
+  "data": {
+    "request": "play upbeat morning music",
+    "track": "Example Track",
+    "artist": "Example Artist",
+    "source_kind": "adaptive_session"
+  }
+}
+

@@ -1,0 +1,48 @@
+{
+  "app_id": "vesper",
+  "description": "Music-control agent for Cider and Apple Music.",
+  "default_scopes": ["events:write", "events:read"],
+  "schemas": [
+    {
+      "event_type": "music.playback.started",
+      "version": 1,
+      "record_family": "event",
+      "description": "Music playback started.",
+      "searchable_fields": ["request", "track", "artist", "source_kind"],
+      "redacted_fields": [],
+      "json_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "request": {"type": "string"},
+          "track": {"type": "string"},
+          "artist": {"type": "string"},
+          "source_kind": {"type": "string"}
+        },
+        "required": ["request", "track", "artist", "source_kind"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "event_type": "music.preference.recorded",
+      "version": 1,
+      "record_family": "app_preference",
+      "description": "Vesper recorded an explicit music preference.",
+      "searchable_fields": ["preference_type", "target", "polarity", "reason"],
+      "redacted_fields": [],
+      "json_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "preference_type": {"type": "string"},
+          "target": {"type": "string"},
+          "polarity": {"type": "string"},
+          "reason": {"type": ["string", "null"]}
+        },
+        "required": ["preference_type", "target", "polarity"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}
+

@@ -61,9 +61,7 @@ class Settings:
     resolver_max_retries: int = 3
     verify_tls: bool = True
     log_level: str = "INFO"
-    max_query_steps: int = 5
     max_search_results: int = 50
-    max_full_event_fetches: int = 20
     max_records_per_model_call: int = 50
     max_query_records: int = 1000
     max_evidence_characters: int = 32000
@@ -137,9 +135,7 @@ class Settings:
         if self.resolver_max_retries < 0 or self.resolver_max_retries > 10:
             raise ConfigError("resolver_max_retries must be between 0 and 10.")
         for name in (
-            "max_query_steps",
             "max_search_results",
-            "max_full_event_fetches",
             "max_records_per_model_call",
             "max_query_records",
             "max_evidence_characters",

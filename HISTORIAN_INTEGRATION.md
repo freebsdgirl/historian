@@ -19,7 +19,7 @@ When debugging an integration, enable Historian's `debug_enabled` setting. Inspe
 Default Historian URL:
 
 ```text
-http://127.0.0.1:8768
+http://127.0.0.1:8760
 ```
 
 Event endpoint:
@@ -65,7 +65,7 @@ Add these settings using the application's existing strict config and environmen
 ```json
 {
   "historian_enabled": false,
-  "historian_base_url": "http://127.0.0.1:8768",
+  "historian_base_url": "http://127.0.0.1:8760",
   "historian_token": null,
   "historian_timeout_seconds": 5.0,
   "historian_verify_tls": true,

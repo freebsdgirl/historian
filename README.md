@@ -118,7 +118,7 @@ The official Python client adds bounded retries:
 ```python
 from historian.client import HistorianClient
 
-client = HistorianClient("http://127.0.0.1:8768", token)
+client = HistorianClient("http://127.0.0.1:8760", token)
 client.emit(event)
 ```
 

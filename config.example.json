@@ -1,7 +1,7 @@
 {
   "http_host": "127.0.0.1",
-  "http_port": 8768,
-  "public_base_url": "http://127.0.0.1:8768",
+  "http_port": 8760,
+  "public_base_url": "http://127.0.0.1:8760",
   "database_path": "~/.local/share/historian/historian.db",
   "resolver_backend": "openai_compatible",
   "resolver_base_url": "http://localhost:11434/v1",

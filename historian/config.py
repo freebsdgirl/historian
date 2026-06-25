@@ -45,8 +45,8 @@ def _coerce(raw: str, default: Any) -> Any:
 class Settings:
     loaded_config_path: str | None = field(default=None, init=False)
     http_host: str = "127.0.0.1"
-    http_port: int = 8768
-    public_base_url: str = "http://127.0.0.1:8768"
+    http_port: int = 8760
+    public_base_url: str = "http://127.0.0.1:8760"
     database_path: str = str(_xdg_data_home() / "historian" / "historian.db")
     resolver_backend: str = "openai_compatible"
     resolver_base_url: str = "http://localhost:11434/v1"

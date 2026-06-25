@@ -77,6 +77,11 @@ less /tmp/historian-resolver.log
 
 `doctor` reports whether debug mode is enabled and whether both configured paths are writable.
 
+### Known Limitations
+
+- The resolver transcript retains only the most recent top-level query. Under concurrent queries, earlier queries may have incomplete or missing transcript entries because a new query overwrites the file.
+- Time-bound inference from question text recognizes only the word "today" (midnight to now). Phrases such as "this morning", "yesterday", or "this week" do not trigger implied bounds; the local-model planner is the primary mechanism for timestamp selection.
+
 ## Integration
 
 An application ships a manifest containing its event schemas. The administrator installs it:

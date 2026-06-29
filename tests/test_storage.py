@@ -77,6 +77,27 @@ def test_regex_requires_a_non_regex_bound(context, vesper_token) -> None:
         context.service.raw_search(principal, SearchSpec(regex_patterns=["song"]))
 
 
+def test_regex_timeout_guard_fires_on_catastrophic_backtracking(context, vesper_token) -> None:
+    """A catastrophic-backtracking regex must hit the timeout guard, not hang.
+
+    This verifies the `regex` module's timeout is wired through: a pattern like
+    (a+)+ against a long non-matching string would hang without the guard. The
+    fallback to the stdlib `re` module (which has no timeout) is intentionally
+    removed — `regex` is a hard dependency.
+    """
+    principal = context.store.authenticate(vesper_token)
+    # Ingest an event whose text is long enough to trigger backtracking.
+    payload = event("slow", track="a" * 60)
+    context.service.ingest(principal, payload)
+    # (a|aa)*b against all-a's never matches and is exponential without a timeout.
+    # This pattern passes the nested-quantifier pre-check but still backtracks.
+    with pytest.raises(ValidationError, match="timeout"):
+        context.service.raw_search(
+            principal,
+            SearchSpec(regex_patterns=["track: (a|aa)*b"], exact_phrases=["a" * 60]),
+        )
+
+
 def test_token_rotation_revokes_previous_default(context, vesper_manifest) -> None:
     first = context.store.install_app(vesper_manifest)
     second = context.store.install_app(vesper_manifest)

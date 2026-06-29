@@ -39,6 +39,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from google.protobuf.json_format import MessageToDict
 
+from . import __version__
 from .app import AppContext
 from .debug import get_logger
 from .errors import (
@@ -78,7 +79,7 @@ def build_agent_card(base_url: str) -> AgentCard:
     return AgentCard(
         name="Historian",
         description="Query registered application events, transcripts, summaries, facts, preferences, errors, and status history.",
-        version="0.1.0",
+        version=__version__,
         supported_interfaces=[
             AgentInterface(
                 url=f"{base_url.rstrip('/')}/a2a",
@@ -179,7 +180,7 @@ class HistorianAgentExecutor(AgentExecutor):
 
 def create_http_app(context: AppContext) -> FastAPI:
     card = build_agent_card(context.settings.public_base_url)
-    app = FastAPI(title="Historian", version="0.1.0")
+    app = FastAPI(title="Historian", version=__version__)
 
     @app.middleware("http")
     async def authenticate_request(request: Request, call_next):

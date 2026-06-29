@@ -9,6 +9,12 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      # Dynamic version (hatch-vcs/setuptools-scm) would drift on every commit
+      # after a tag, breaking `uv sync --locked`. Pin a fixed version so the
+      # lockfile validation is deterministic regardless of git state. Release
+      # builds use the real tag-derived version (see release.yml).
+      SETUPTOOLS_SCM_PRETEND_VERSION: "0.0.0"
 
     steps:
       - uses: actions/checkout@v4

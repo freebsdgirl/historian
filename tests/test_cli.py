@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+from importlib.resources import files
+from pathlib import Path
 
 from historian.app import build_app
 from historian.cli import main
@@ -84,3 +86,60 @@ def test_init_cli_token_becomes_default_credential(config_path, tmp_path, capsys
     assert main(["--config", str(config_path), "events", "list"]) == 0
     listed = json.loads(capsys.readouterr().out)
     assert listed["status"] == "ok"
+
+
+def _template_text() -> str:
+    return files("historian").joinpath("config.example.json").read_text(encoding="utf-8")
+
+
+def test_config_init_writes_default_config(tmp_path, capsys) -> None:
+    target = tmp_path / "config.json"
+    assert main(["config", "init", "--path", str(target)]) == 0
+    assert target.is_file()
+    assert target.read_text(encoding="utf-8") == _template_text()
+    assert "Wrote config" in capsys.readouterr().out
+
+
+def test_config_init_refuses_overwrite(tmp_path, capsys) -> None:
+    target = tmp_path / "config.json"
+    target.write_text("existing", encoding="utf-8")
+    assert main(["config", "init", "--path", str(target)]) == 2
+    assert "--force" in capsys.readouterr().err
+    assert target.read_text(encoding="utf-8") == "existing"
+
+
+def test_config_init_force_overwrites(tmp_path) -> None:
+    target = tmp_path / "config.json"
+    target.write_text("existing", encoding="utf-8")
+    assert main(["config", "init", "--path", str(target), "--force"]) == 0
+    assert target.read_text(encoding="utf-8") == _template_text()
+
+
+def test_config_init_print_outputs_template(capsys) -> None:
+    assert main(["config", "init", "--print"]) == 0
+    assert capsys.readouterr().out == _template_text()
+
+
+def test_config_init_print_does_not_write_file(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert main(["config", "init", "--print"]) == 0
+    assert not (tmp_path / "config.json").exists()
+
+
+def test_config_path_prints_loaded_path(tmp_path, capsys) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"resolver_backend": "fake", "database_path": str(tmp_path / "db.db")}),
+        encoding="utf-8",
+    )
+    assert main(["--config", str(config_path), "config", "path"]) == 0
+    assert capsys.readouterr().out.strip() == str(config_path.resolve())
+
+
+def test_config_path_reports_none_when_no_config(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("HISTORIAN_CONFIG_PATH", raising=False)
+    assert main(["config", "path"]) == 0
+    assert "none" in capsys.readouterr().out

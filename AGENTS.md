@@ -48,3 +48,10 @@ This repository's GitHub remote is named `upstream`, not `origin`; check configu
 ## Notes
 
 The local model resolver expects an OpenAI-compatible endpoint (default `http://localhost:11434/v1`, model `gemma4:latest`). Tests use a `FakeQueryResolver` and do not require a running model. Run `uv run historian doctor --live` to verify the live model endpoint and debug-log writability before relying on natural-language queries.
+
+## Config template sync
+
+`historian/config.example.json` is the packaged template users bootstrap from via
+`historian config init`. When adding, removing, or renaming a `Settings` field, update
+`historian/config.example.json` in the same change so the template stays in sync with
+the dataclass defaults.

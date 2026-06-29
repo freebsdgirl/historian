@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field, fields
+from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,49 @@ def _xdg_config_home() -> Path:
 
 def _xdg_data_home() -> Path:
     return Path(os.getenv("XDG_DATA_HOME", "~/.local/share")).expanduser()
+
+
+#: Filename of the packaged template, relative to the ``historian`` package.
+CONFIG_TEMPLATE_NAME = "config.example.json"
+
+
+def default_config_path() -> Path:
+    """Return the config path Historian loads by default for installed users.
+
+    This is the XDG-style path (``${XDG_CONFIG_HOME:-~/.config}/historian/config.json``),
+    not ``./config.json``. ``historian config init`` writes here so it lands at the
+    standard location a non-clone user will load from.
+    """
+    return _xdg_config_home() / "historian" / "config.json"
+
+
+def read_config_template() -> str:
+    """Return the text of the packaged config template."""
+    try:
+        return files("historian").joinpath(CONFIG_TEMPLATE_NAME).read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise ConfigError(
+            f"Packaged config template not found: {CONFIG_TEMPLATE_NAME}. "
+            "Your historian installation may be incomplete; reinstall with "
+            "'uv tool install --force git+https://github.com/randileeharper/historian'."
+        ) from exc
+
+
+def write_default_config(target: Path | None = None, *, force: bool = False) -> Path:
+    """Write the packaged template config to *target* (default: XDG path).
+
+    Returns the path written. Refuses to overwrite an existing file unless
+    *force* is True.
+    """
+    if target is None:
+        target = default_config_path()
+    target = Path(target).expanduser()
+    if target.is_file() and not force:
+        raise ConfigError(f"Config file already exists: {target}. Use --force to overwrite.")
+    template = read_config_template()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(template, encoding="utf-8")
+    return target
 
 
 def _coerce(raw: str, default: Any) -> Any:

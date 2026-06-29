@@ -9,12 +9,26 @@ Historian preserves raw provenance underneath every derived view. Literal user m
 
 ## Setup
 
+Clone the repository and sync dependencies:
+
 ```console
+git clone https://github.com/randileeharper/historian.git
+cd historian
 uv sync
 uv run historian config init
 uv run historian app install examples/vesper.historian.json
 uv run historian serve
 ```
+
+To install Historian as a standalone CLI tool without cloning:
+
+```console
+uv tool install git+https://github.com/randileeharper/historian
+historian config init
+historian serve
+```
+
+A tool-only install does not include the bundled `examples/` manifests; fetch the one you need from the repository when running `app install`.
 
 `historian config init` writes the packaged template to `~/.config/historian/config.json`
 (use `--path` for a custom location, `--force` to overwrite, or `--print` to output the

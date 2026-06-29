@@ -20,10 +20,15 @@ Historian preserves raw provenance underneath every derived view. Literal user m
 
 ```console
 uv sync
-cp config.example.json config.json
+uv run historian config init
 uv run historian app install examples/vesper.historian.json
 uv run historian serve
 ```
+
+`historian config init` writes the packaged template to `~/.config/historian/config.json`
+(use `--path` for a custom location, `--force` to overwrite, or `--print` to output the
+template to stdout without writing a file). `historian config path` prints the config
+file Historian loaded from (or `none` if using built-in defaults).
 
 `app install` prints a token once. Put it in the application's secret configuration:
 

@@ -87,6 +87,23 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = sub.add_parser("doctor", help="Validate local configuration and storage.")
     doctor.add_argument("--live", action="store_true")
 
+    config = sub.add_parser("config", help="Manage Historian configuration.")
+    config_subparsers = config.add_subparsers(dest="config_command", required=True)
+    config_init = config_subparsers.add_parser("init", help="Write the default config file.")
+    config_init.add_argument(
+        "--path",
+        type=Path,
+        default=None,
+        help="Config file path (default: ~/.config/historian/config.json)",
+    )
+    config_init.add_argument("--force", action="store_true", help="Overwrite an existing config file.")
+    config_init.add_argument(
+        "--print",
+        action="store_true",
+        help="Print the template to stdout instead of writing a file.",
+    )
+    config_subparsers.add_parser("path", help="Print the path Historian loads config from.")
+
     parser.add_argument("--json", action="store_true", dest="as_json")
     return parser
 
@@ -142,6 +159,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                 port=args.port or context.settings.http_port,
                 log_level=context.settings.log_level.lower(),
             )
+            return 0
+
+        if args.command == "config" and args.config_command == "init":
+            from .config import read_config_template, write_default_config
+
+            if args.print:
+                print(read_config_template(), end="")
+                return 0
+
+            path = write_default_config(args.path, force=args.force)
+            print(f"Wrote config to {path}")
+            return 0
+
+        if args.command == "config" and args.config_command == "path":
+            settings = Settings.load(args.config_path)
+            print(settings.loaded_config_path or "(none — using built-in defaults)")
             return 0
 
         context = build_app(args.config_path)

@@ -36,7 +36,7 @@ These steps are needed before Historian is a continuously running, useful servic
    uv sync
    ```
 
-2. Create `config.json` from `config.example.json`.
+2. Run `uv run historian config init` to create `config.json` from the packaged template.
 
 3. Confirm the live local-model configuration:
 

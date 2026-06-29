@@ -30,6 +30,7 @@ packages = ["historian"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "historian/builtin_manifest.json" = "historian/builtin_manifest.json"
+"historian/config.example.json" = "historian/config.example.json"
 
 # Version is derived from git tags via hatch-vcs (setuptools-scm). To cut a
 # release, tag the commit (`git tag vX.Y.Z && git push --tags`) — no version

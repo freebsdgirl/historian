@@ -3,6 +3,7 @@ name = "historian"
 version = "0.1.0"
 description = "Local event, transcript, and operational-history service for agent applications."
 readme = "README.md"
+license = "BSD-2-Clause"
 requires-python = ">=3.12"
 dependencies = [
   "a2a-sdk>=1.1,<1.2",

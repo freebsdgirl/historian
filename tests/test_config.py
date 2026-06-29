@@ -50,6 +50,13 @@ def test_resolver_retry_count_is_bounded(tmp_path) -> None:
         Settings.load(str(path))
 
 
+def test_request_timeout_must_be_positive(tmp_path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"request_timeout_seconds": 0}), encoding="utf-8")
+    with pytest.raises(ConfigError, match="request_timeout_seconds must be positive."):
+        Settings.load(str(path))
+
+
 def test_record_synthesis_limits_have_expected_defaults() -> None:
     settings = Settings()
     assert settings.max_records_per_model_call == 50

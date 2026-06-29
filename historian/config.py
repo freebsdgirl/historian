@@ -178,6 +178,8 @@ class Settings:
             raise ConfigError("resolver_model is required.")
         if self.resolver_max_retries < 0 or self.resolver_max_retries > 10:
             raise ConfigError("resolver_max_retries must be between 0 and 10.")
+        if self.request_timeout_seconds <= 0:
+            raise ConfigError("request_timeout_seconds must be positive.")
         for name in (
             "max_search_results",
             "max_records_per_model_call",

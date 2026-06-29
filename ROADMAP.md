@@ -92,7 +92,7 @@ Recommended order:
 4. Luke and sidecar A2A query access with a token containing `query:nlp`.
 5. Other channel workers such as Bluesky, mail, reminders, and iMessage.
 
-Each producer integration should follow `HISTORIAN_INTEGRATION.md`.
+Each producer integration should follow [`docs/integration.md`](docs/integration.md).
 
 ## Deferred Work
 

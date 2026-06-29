@@ -1,6 +1,6 @@
 [project]
 name = "historian"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Local event, transcript, and operational-history service for agent applications."
 readme = "README.md"
 license = "BSD-2-Clause"
@@ -19,7 +19,7 @@ dependencies = [
 historian = "historian.cli:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [dependency-groups]
@@ -30,6 +30,15 @@ packages = ["historian"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "historian/builtin_manifest.json" = "historian/builtin_manifest.json"
+
+# Version is derived from git tags via hatch-vcs (setuptools-scm). To cut a
+# release, tag the commit (`git tag vX.Y.Z && git push --tags`) — no version
+# bump in this file. CI pins SETUPTOOLS_SCM_PRETEND_VERSION=0.0.0 so that
+# `uv sync --locked` sees a stable version matching uv.lock regardless of
+# git state; release builds (`uv build` at tag time) use the real version.
+[tool.hatch.version]
+source = "vcs"
+fallback-version = "0.0.0"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

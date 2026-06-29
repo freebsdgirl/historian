@@ -8,7 +8,7 @@ import pytest
 
 import historian.client as client_module
 from historian.client import HistorianClient
-from historian.errors import HistorianError
+from historian.errors import HistorianConnectionError, HistorianError
 
 
 def _patch_http(monkeypatch, handler) -> MagicMock:
@@ -104,7 +104,7 @@ def test_transport_error_is_retried(monkeypatch) -> None:
     )
     client = _make_client(retry_count=2)
 
-    with pytest.raises(HistorianError) as exc_info:
+    with pytest.raises(HistorianConnectionError) as exc_info:
         client.get_event("evt-1")
-    assert "failed" in str(exc_info.value).lower()
+    assert "unreachable" in str(exc_info.value).lower()
     assert counter.call_count == 3

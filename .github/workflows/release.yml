@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # required by softprops/action-gh-release to create releases
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Fetch full history + tags so hatch-vcs (setuptools-scm) can derive
+          # the real version from the most recent tag. Must NOT set
+          # SETUPTOOLS_SCM_PRETEND_VERSION here — release builds need the real
+          # tag-derived version, unlike CI's locked sync.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        # Pin the version for lockfile validation, matching CI. The real
+        # tag-derived version is used only by the `uv build` step below.
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: "0.0.0"
+        run: uv sync --locked
+
+      - name: Run tests
+        # Gate the build on a green test suite so a broken tag push is caught
+        # before it produces artifacts. Belt-and-suspenders: tags are
+        # controlled, but CI is not a strict prerequisite for pushing a tag.
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: "0.0.0"
+        run: uv run pytest -q
+
+      - name: Build sdist and wheel
+        run: uv build
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/* # retained for debugging; the GitHub Release is the primary delivery
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

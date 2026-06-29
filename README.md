@@ -1,5 +1,8 @@
 # Historian
 
+[![CI](https://github.com/randileeharper/historian/actions/workflows/ci.yml/badge.svg)](https://github.com/randileeharper/historian/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/github/v/tag/randileeharper/historian?label=version)](https://github.com/randileeharper/historian/tags)
+
 Historian is a local event, transcript, and operational-history service for small agent applications. Apps emit registered structured events over HTTP. Agents ask evidence-bounded natural-language questions over A2A.
 
 Historian preserves raw provenance underneath every derived view. Literal user messages, assistant messages, and private runtime/sidecar events are distinct record types. A runtime may render an internal event as a user-shaped `/chat/completions` message, but Historian never rewrites it as something the user literally said.

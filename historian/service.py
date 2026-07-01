@@ -319,7 +319,7 @@ class HistorianService:
             "source": "app://historian/query",
             "type": "historian.query.completed",
             "time": utc_now(),
-            "schemaversion": 2,
+            "schemaversion": 1,
             "visibility": "private",
             "data": {
                 "caller_app_id": principal.app_id,

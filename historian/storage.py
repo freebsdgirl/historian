@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterator, Protocol
+from typing import Any, Iterator
 
 from .errors import AuthenticationError, ConflictError, StorageError, ValidationError
 from .debug import get_logger
@@ -31,15 +31,6 @@ import regex as timeout_regex
 
 SCHEMA_VERSION = 1
 _LOG = get_logger("storage")
-
-
-class HistorianStore(Protocol):
-    def install_app(self, manifest: AppManifest) -> str: ...
-    def replace_app_schemas(self, manifest: AppManifest) -> None: ...
-    def authenticate(self, token: str) -> AuthPrincipal: ...
-    def ingest(self, principal: AuthPrincipal, event: EventEnvelope) -> tuple[StoredEvent, bool]: ...
-    def search(self, spec: SearchSpec) -> list[StoredEvent]: ...
-    def get_event(self, event_id: str) -> StoredEvent | None: ...
 
 
 def _canonical_json(value: Any) -> str:

@@ -101,3 +101,82 @@ def test_a2a_query_is_authenticated_and_returns_answer(context, resolver, vesper
     assert data["answer"] == "Vesper started Morning Song."
     assert "cited_event_ids" not in data
     assert "events" not in data
+
+
+def test_batch_endpoint_ingests_valid_batch(context, vesper_token) -> None:
+    """POST /v1/events:batch accepts a valid batch and returns results with duplicate flags."""
+    app = create_http_app(context)
+    batch = {
+        "events": [
+            event(event_id="batch-1"),
+            event(event_id="batch-2", track="Evening Song"),
+        ]
+    }
+    response = asyncio.run(
+        _request(
+            app,
+            "POST",
+            "/v1/events:batch",
+            headers={"Authorization": f"Bearer {vesper_token}"},
+            json=batch,
+        )
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert len(body["events"]) == 2
+    assert [e["event"]["event_id"] for e in body["events"]] == ["batch-1", "batch-2"]
+    assert all("duplicate" in e for e in body["events"])
+
+
+def test_batch_endpoint_rejects_missing_events_array(context, vesper_token) -> None:
+    """POST /v1/events:batch rejects a body without an events array with 422."""
+    app = create_http_app(context)
+    response = asyncio.run(
+        _request(
+            app,
+            "POST",
+            "/v1/events:batch",
+            headers={"Authorization": f"Bearer {vesper_token}"},
+            json={"not_events": []},
+        )
+    )
+    assert response.status_code == 422
+    assert response.json()["status"] == "error"
+
+
+def test_search_endpoint_filters_by_fields(context, vesper_token) -> None:
+    """POST /v1/search accepts SearchSpec fields and returns matching events."""
+    principal = context.store.authenticate(vesper_token)
+    context.service.ingest(principal, event(event_id="search-1", track="Morning Song"))
+    context.service.ingest(principal, event(event_id="search-2", track="Evening Song"))
+    app = create_http_app(context)
+    response = asyncio.run(
+        _request(
+            app,
+            "POST",
+            "/v1/search",
+            headers={"Authorization": f"Bearer {vesper_token}"},
+            json={"apps": ["vesper"], "exact_phrases": ["Morning Song"], "limit": 10},
+        )
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert [e["event_id"] for e in body["events"]] == ["search-1"]
+
+
+def test_search_endpoint_rejects_invalid_spec(context, vesper_token) -> None:
+    """POST /v1/search rejects an invalid search spec with 422."""
+    app = create_http_app(context)
+    response = asyncio.run(
+        _request(
+            app,
+            "POST",
+            "/v1/search",
+            headers={"Authorization": f"Bearer {vesper_token}"},
+            json={"bogus_field": "invalid"},
+        )
+    )
+    assert response.status_code == 422
+    assert response.json()["status"] == "error"

@@ -100,6 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
     config_init.add_argument(
         "--print",
         action="store_true",
+        dest="print_template",
         help="Print the template to stdout instead of writing a file.",
     )
     config_subparsers.add_parser("path", help="Print the path Historian loads config from.")
@@ -177,7 +178,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "config" and args.config_command == "init":
             from .config import read_config_template, write_default_config
 
-            if args.print:
+            if args.print_template:
                 print(read_config_template(), end="")
                 return 0
 
@@ -341,6 +342,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                         verify=settings.verify_tls,
                     )
                     payload["resolver_http_status"] = response.status_code
+                    if response.status_code == 200:
+                        available = [
+                            m.get("id") for m in response.json().get("data", []) if m.get("id")
+                        ]
+                        payload["resolver_models"] = available
+                        if settings.resolver_model not in available:
+                            payload["status"] = "error"
+                            payload["resolver_error"] = (
+                                f'resolver_model "{settings.resolver_model}" not found in '
+                                f"available models: {available}"
+                            )
                 except httpx.HTTPError as exc:
                     payload["status"] = "error"
                     payload["resolver_error"] = str(exc)

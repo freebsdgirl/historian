@@ -26,10 +26,7 @@ from .models import (
     utc_now,
 )
 
-try:
-    import regex as timeout_regex
-except ImportError:  # Development fallback; regex is a required package in installed builds.
-    timeout_regex = None
+import regex as timeout_regex
 
 
 SCHEMA_VERSION = 1
@@ -652,16 +649,13 @@ def _compile_safe_regex(pattern: str) -> Any:
     if re.search(r"\([^)]*[+*][^)]*\)[+*{]", pattern):
         raise ValidationError("Regex contains a nested quantifier.")
     try:
-        engine = timeout_regex if timeout_regex is not None else re
-        return engine.compile(pattern, engine.IGNORECASE)
+        return timeout_regex.compile(pattern, timeout_regex.IGNORECASE)
     except Exception as exc:
         raise ValidationError(f"Invalid regex {pattern!r}: {exc}") from exc
 
 
 def _regex_search(pattern: Any, text: str, timeout_seconds: float) -> Any:
-    if timeout_regex is not None:
-        return pattern.search(text, timeout=timeout_seconds)
-    return pattern.search(text)
+    return pattern.search(text, timeout=timeout_seconds)
 
 
 _MIGRATION_1 = """

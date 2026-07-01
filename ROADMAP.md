@@ -18,6 +18,7 @@ Historian v1 is implemented as a Python 3.12 service with:
 - A fixed query pipeline: the local model selects registered applications and record types with optional local-time bounds and per-type literal text, Historian searches SQLite, and the model synthesizes an answer from compact matching records.
 - Bounded correction retries for transport failures, malformed structured output, invalid timestamps, and invented applications or record types.
 - Private self-logging of Historian queries without model reasoning.
+- Built-in schemas (including `historian.query.completed`) start at version 1 and are versioned independently from `SCHEMA_VERSION` (the SQLite migration version). Application-defined schemas follow the same convention — the version is the manifest author's to bump when the `json_schema` changes.
 - Unified debug mode with a startup-scoped operational log and a complete last-query local-model transcript.
 - CLI administration, querying, raw inspection, and event emission.
 - A synchronous Python client with bounded retries.

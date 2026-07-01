@@ -5,6 +5,8 @@ import os
 from importlib.resources import files
 from pathlib import Path
 
+import httpx
+
 from historian.app import build_app
 from historian.cli import main
 from historian.client import HistorianClient
@@ -307,3 +309,47 @@ def test_ask_does_not_fall_back_on_server_error(config_path, tmp_path, capsys, m
     monkeypatch.setattr(HistorianClient, "query", fake_query)
     assert main(["--config", str(config_path), "ask", "what happened"]) == 1
     assert "401" in capsys.readouterr().err
+
+
+def _openai_config(config_path, tmp_path) -> None:
+    """Switch a config_path to openai_compatible for doctor --live tests."""
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    payload["resolver_backend"] = "openai_compatible"
+    payload["resolver_model"] = "gemma4:latest"
+    payload["resolver_base_url"] = "http://localhost:11434/v1"
+    config_path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_doctor_live_validates_model_available(config_path, tmp_path, capsys, monkeypatch) -> None:
+    """doctor --live reports ok when resolver_model is in the /models response."""
+    _openai_config(config_path, tmp_path)
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"data": [{"id": "gemma4:latest"}, {"id": "llama3:latest"}]}
+
+    monkeypatch.setattr(httpx, "get", lambda *args, **kwargs: FakeResponse())
+    assert main(["--config", str(config_path), "doctor", "--live"]) == 0
+    doctor = json.loads(capsys.readouterr().out)
+    assert doctor["status"] == "ok"
+    assert doctor["resolver_models"] == ["gemma4:latest", "llama3:latest"]
+
+
+def test_doctor_live_flags_missing_model(config_path, tmp_path, capsys, monkeypatch) -> None:
+    """doctor --live sets status to error when resolver_model is not in available models."""
+    _openai_config(config_path, tmp_path)
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"data": [{"id": "llama3:latest"}, {"id": "qwen2:latest"}]}
+
+    monkeypatch.setattr(httpx, "get", lambda *args, **kwargs: FakeResponse())
+    assert main(["--config", str(config_path), "doctor", "--live"]) == 2
+    doctor = json.loads(capsys.readouterr().out)
+    assert doctor["status"] == "error"
+    assert "gemma4:latest" in doctor["resolver_error"]
+    assert "llama3:latest" in doctor["resolver_error"]

@@ -15,7 +15,7 @@ from .app import build_app
 from .client import HistorianClient
 from .config import Settings
 from .debug import check_debug_path
-from .errors import ConfigError, HistorianError
+from .errors import ConfigError, HistorianConnectionError, HistorianError
 from .http import create_http_app
 from .manifests import VALID_SCOPES, load_manifest
 from .models import SearchSpec, to_jsonable
@@ -270,7 +270,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             event = json.loads(args.event_file.read_text(encoding="utf-8"))
             try:
                 payload = _try_client(settings, token).emit(event)
-            except HistorianError:
+            except HistorianConnectionError:
+                # Server unreachable (connection refused, timeout, DNS failure): fall
+                # back to in-process execution. Non-transport errors (auth, validation,
+                # conflict, 5xx) propagate to the caller as HistorianError.
                 principal = context.store.authenticate(token)
                 stored, duplicate = context.service.ingest(principal, event)
                 payload = {"status": "ok", "duplicate": duplicate, "event": stored}
@@ -281,7 +284,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             token = _token(args, settings)
             try:
                 payload = _try_client(settings, token).query(args.question)
-            except HistorianError:
+            except HistorianConnectionError:
                 principal = context.store.authenticate(token)
                 payload = to_jsonable(context.service.query(principal, args.question))
             _print(payload)

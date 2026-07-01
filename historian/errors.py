@@ -33,6 +33,10 @@ class ResolverError(HistorianError):
     """Local model request or output failure."""
 
 
+class HistorianConnectionError(HistorianError):
+    """The Historian server could not be reached (transport failure)."""
+
+
 class QueryError(HistorianError):
     """Historian could not execute a query safely."""
 

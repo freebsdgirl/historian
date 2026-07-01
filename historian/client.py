@@ -16,7 +16,7 @@ from a2a.helpers import new_text_part
 from a2a.types import Message, Role, SendMessageRequest, Task, TaskState
 from google.protobuf.json_format import MessageToDict
 
-from .errors import HistorianError
+from .errors import HistorianConnectionError, HistorianError
 
 
 @dataclass(slots=True)
@@ -66,6 +66,8 @@ class HistorianClient:
                     if payload is not None:
                         return payload
             raise HistorianError("A2A query returned no result.")
+        except httpx.TransportError as exc:
+            raise HistorianConnectionError(f"A2A query failed (server unreachable): {exc}") from exc
         except (httpx.HTTPError, ValueError) as exc:
             raise HistorianError(f"A2A query failed: {exc}") from exc
         finally:
@@ -123,7 +125,14 @@ class HistorianClient:
                 if attempt < self.retry_count:
                     time.sleep(0.1 * (2**attempt))
                     continue
-                raise HistorianError(f"Historian request failed: {last_error}") from exc
+                # Transport failures (server unreachable) are distinguishable from
+                # server-side errors so callers can decide whether a local fallback
+                # is appropriate.
+                if isinstance(exc, httpx.TransportError):
+                    raise HistorianConnectionError(
+                        f"Historian server unreachable: {exc}"
+                    ) from exc
+                raise HistorianError(f"Historian request failed: {exc}") from exc
 
             # 4xx (except 429 Too Many Requests) are not retryable: validation, auth,
             # authorization, and conflict failures must surface immediately rather than
